@@ -1,0 +1,282 @@
+/************************************************
+* Individual-based model of fig wasp storage effect
+* Brad Duthie 2012
+* http://www.aduthie.public.iastate.edu
+************************************************/
+/* Trick: #define length(x) (sizeof (x) / sizeof *(x)) */
+
+#define Pi 3.141592
+
+#include <time.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include "array.h"
+#include "randunif.h"
+#include "Eix.h"
+#include "SampleNoReplace.h"
+#include "randnormINT.h"
+#include "DispVals.h"
+
+int main(void){
+    
+    int i, j, k, l, c, z, m, o, lot, q, f, w, rep, r;
+    int **I, **T, **U, *V, *R, *Z, *B, *disps;
+    int pid;    
+
+    int ITR  = 1; /*Default = 1000 */
+    int tau  = 5;
+    int tim  = 5200; /*Default = 5200 */
+    int abun = 10000;
+    int ovul = 10000;
+    int geno1[2], geno2[2];    
+
+    double a, C, g1, g2, tk, rdis, a1, a2, p1, p2, g, h;
+    double delta  = 1.0;
+    double alpha  = 1.0/(1200.00*1200.00);
+    double rtar   = 100.0;
+    double lp     = 100.0;
+    
+    FILE *fin;
+    FILE *Disps;
+    FILE *Inds;
+    FILE *evol;
+
+    /* srand((unsigned)time(NULL)); */
+
+    Disps = fopen("Disps.txt","r");        /* File required to input dispersal values */
+    fin   = fopen("UniformTest.txt", "w"); /* Output file */
+    Inds  = fopen("Individuals.txt","w");  /* Record final individuals */
+    evol  = fopen("evol.txt","w");         /* Look at how evolution occurs */
+
+    rep = 0;
+
+    MAKE_1ARRAY(disps, 251);
+    DispVals(Disps, disps); /*Reads in the dispersal trade-off from external file to array */
+
+    srand(time(NULL) ^ (getpid()<<16));
+
+    while(rep < ITR){    
+
+        abun = 10000;
+        /*
+        do{*/ /* Can reject starting conditions with unrealistic parameter values */
+            /* printf("Reject Initial Trait Values\t");            
+            geno1[0]  = floor(randunif()*250 + 50);    printf("%d\t",geno1[0]);
+            geno1[1]  = floor(randunif()*19000 + 1000); printf("%d\t",geno1[1]);
+            geno2[0]  = floor(randunif()*250 + 50); printf("%d\t",geno2[0]);
+            geno2[1]  = floor(randunif()*19000 + 1000); printf("%d\n",geno2[1]);
+        }while(geno1[1] > disps[geno1[0]-50] || geno2[1] > disps[geno2[0]-50] || 
+            geno1[0] != geno1[0] || geno1[1] != geno1[1] || 
+            geno2[0] != geno2[0] || geno2[1] != geno2[1]);
+        printf("\n\n"); */
+
+        /* Using below sets the starting values explicitly */
+        geno1[0] = 170; geno1[1] = 5000; geno2[0] = 80; geno2[1] = 8000;  
+
+        a1 = (abun/2);
+        a2 = (abun/2);
+        g1 = geno1[0]*a1;
+        g2 = geno2[0]*a2;
+        p1 = geno1[1]*a1;
+        p2 = geno2[1]*a2;
+
+        MAKE_2ARRAY(I, abun, 4);
+    
+        fprintf(fin,"%d\t%d\t%d\t%d\t",geno1[0],geno1[1],geno2[0],geno2[1]);
+    
+        i = 0;
+        /* The loop below sets up a matrix of wasps */
+        while(i < abun){
+            I[i][0] = floor((tau+1)*randunif()); /* Random development stage */
+            I[i][1] = floor(2*randunif()); /*Random species */ /*printf("%d\t",I[i][1]);*/
+            if(I[i][1] == 0){ /*Species assigned genotype below */
+                I[i][2] = geno1[0];
+                I[i][3] = geno1[1];        
+            }else{
+                I[i][2] = geno2[0];
+                I[i][3] = geno2[1];
+            } /* Now all of the starting individuals are set with their genotypes */
+            i++; /* printf("\n"); */
+        }        
+        /* The loop below starts the simulation with tim time steps */
+        i = 0; /* printf("\n"); */
+        while (i < tim){
+            c = 0;
+            for(j=0; j<abun; j++){ /* Records development time */
+                I[j][0]--; 
+            /*    if(I[j][0] < 0){ */ /* Stays at zero if already zero */
+            /*        I[j][0] = 0; */
+            /*    } */ /* Below selects from zeros to leave fruit */
+                if(I[j][0] == -3){
+                    c++; /* c counts the number of wasps leaving */
+                } /* In 3+ wks, I[j][0] = -3, regardless of rand sel */    
+                if(I[j][0] > -3 && I[j][0] < 1 && randunif() < delta){
+                    I[j][0] = -3;
+                    c++; /* c counts the number of wasps leaving */
+                } /* Note in 3+ wks, I[j][0] = -3, even if not rand select above */
+            } 
+            if(c > 0){
+                MAKE_2ARRAY(T, c, 4); /* Arrays for leaving and retained wasps */
+                MAKE_2ARRAY(U, abun-c, 4);
+                k = 0; /* Need a new counter to fill in the table */
+                z = 0; /* printf("Leaving-Retained Matrix"); printf("\n"); */
+                for(j=0; j<abun; j++){
+                    if(I[j][0] == -3){ /*Grabs the leaving wasps */
+                        for(l=0; l<4; l++){
+                            T[k][l] = I[j][l]; /* printf("%d\t",I[j][l]); */
+                        }
+                        k++; /* k  is the number of leaving wasps */
+                    }else{ /*Separates the wasps still in fruit */
+                        for(l=0; l<4; l++){
+                            U[z][l] = I[j][l]; /* printf("%d\t",I[j][l]); */
+                        }
+                        z++; /* z is the number of retained wasps */
+                    }
+                } /*T contains leaving wasps; U contains retained wasps */
+                FREE_2ARRAY(I); /*Get rid of old I */
+                rdis = sqrt(-log(randunif())/alpha); /*Generates rdis */
+                MAKE_1ARRAY(B, k); /* Beta values for leaving wasps */
+                MAKE_1ARRAY(V, k); /* Cumulative numbers for sampling */
+                lot = 0; /* Number of wasps competing in lottery */
+                f = 0; /*Number of actual foundresses */
+                for(j=0; j<k; j++){ 
+                    a    = (rdis*rdis)/(2*lp*T[j][3]);
+                    C    = (rtar/(Pi*lp))*(-1*Exponential_Integral_Ei(-a)); 
+                    if(randunif() < C){
+                        B[j] = T[j][2]; 
+                        f++; 
+                    }else{
+                        B[j] = 0; 
+                    }
+                    lot = lot + B[j]; /* Lot counts the offspring in the lottery */
+                    V[j] = lot; /*Each V[j] will have running count of offspring */ 
+                }
+                
+                /* Below moves offspring randomly if more offspring than ovules */ 
+                if(lot > ovul){
+                    MAKE_1ARRAY(Z,ovul);
+                    MAKE_1ARRAY(R,k); 
+                    tk = 0; 
+                    for(j=0; j<k; j++){
+                        if(B[j] > 0){
+                            tk = tk + B[j]; 
+                        }else{
+                            V[j] = 0;
+                        }
+                    }
+                    SampleWithoutReplacement(lot, ovul, Z); 
+                    for(j=0; j<k; j++){
+                        R[j] = 0;    
+                    }
+                    for(j=0; j<ovul; j++){
+                        for(l=0; l<k; l++){
+                            if(Z[j] < V[l] && V[l] > 0){
+                                R[l]++; 
+                                break;    
+                            }
+                        }
+                    } 
+                    for(j=0; j<k; j++){
+                        B[j] = R[j];
+                    } 
+                    lot = ovul;
+                    FREE_1ARRAY(Z);
+                    FREE_1ARRAY(R);    
+                }        
+    
+                /*Below adds retained wasps and offspring to I */
+                MAKE_2ARRAY(I,z+lot,4); /*Make a new I*/ 
+                for(j=0; j<z; j++){ /*Adds the retained wasps back to I */
+                    for(l=0; l<4; l++){
+                        I[j][l] = U[j][l];
+                    }
+                }
+                q = 0; 
+                for(m=0; m<k; m++){ /* For each potential foundress */
+                    if(B[m] > 0){ /* Adds new offspring */
+                        o = 0;
+                        while(o < B[m]){
+                            I[z+q][0] = tau;  /* Larvae start developing */
+                            I[z+q][1] = T[m][1]; /* Same species as parent */
+                            do{                             
+                                r = floor(randunif()*k);
+                            }while(T[r][1] != T[m][1]);
+                            g = (T[m][2]+T[r][2]); /* Double to avoid killing decimals */
+                            h = (T[m][3]+T[r][3]); /* If not used, will decrease trait vals */
+                            I[z+q][2] =   T[m][2]; /* randnormINT(g/2,1); */
+                            I[z+q][3] =   T[m][3]; /* randnormINT(h/2,93); */
+                            if(I[z+q][2] > 300){
+                                I[z+q][2] = 300;
+                            }
+                            if(I[z+q][2] < 50){
+                                I[z+q][2] = 50;
+                            } /*Below avoids a bias in evolution toward Fec/Disp */
+                            if(I[z+q][3] > disps[I[z+q][2]-50]){ /*Disp too high? */
+                                if(randunif() > 0.5){  /* Adjust Fecu/Disp 50:50 */
+                                    I[z+q][3] = disps[I[z+q][2]-50];
+                                }else{ /* Find appropriate Fecu for Disp */
+                                    w = 0;
+                                    for(l=0; l<251; l++){
+                                        if(disps[l] > I[z+q][3]){
+                                            w++;
+                                        }
+                                    }                                
+                                    I[z+q][2] = w + 50;
+                                    I[z+q][3] = disps[I[z+q][2]-50];
+                                }
+
+                            } 
+                            o++;
+                            q++; 
+                        }
+                    }
+                }
+                abun = z+q;
+                FREE_2ARRAY(T);
+                FREE_2ARRAY(U);
+                FREE_1ARRAY(B);        
+                FREE_1ARRAY(V);    /* Below is a messy way of calculating means */    
+            }
+            a1 = 0; /*The code below calculates species abundances */
+            a2 = 0;        
+            g1 = 0; /*The gs calculate the raw sums of Fecundity */
+            g2 = 0;
+            p1 = 0; /*The ps calculate the raw sums of Dispersal */
+            p2 = 0;            
+            for(j=0; j<z+q; j++){
+                if(I[j][1]==0){
+                    a1++;
+                    g1 = g1 + I[j][2];
+                    p1 = p1 + I[j][3];
+                }
+                if(I[j][1]==1){
+                    a2++;
+                    g2 = g2 + I[j][2];
+                    p2 = p2 + I[j][3];                
+                }
+            }
+            printf("%d.%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+                rep,i+1,rdis,a1,a2,g1/a1,g2/a2,p1/a1,p2/a2);
+            fprintf(evol,"%d\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+                rep,i+1,rdis,a1,a2,g1/a1,g2/a2,p1/a1,p2/a2);
+            if(a1/(a1+a2) < 1.0/1000.0 || a2/(a1+a2) < 1.0/1000.0 || a1 == 0 || a2 == 0){
+                printf("\n\nEXTINCTION EVENT\n\n");
+                break;
+            }
+            if(i == tim - 1){
+                for(j=0; j<(a1+a2); j++){
+                    fprintf(Inds,"%d\t%d\t%d\t%d\n",rep,I[j][1],I[j][2],I[j][3]);
+                }
+            } 
+            i++;
+        }
+        fprintf(fin,"%f\t%f\t%f\t%f\t%d\n",g1/a1,p1/a1,g2/a2,p2/a2,i);    
+        rep++;    
+    }    
+    FREE_1ARRAY(disps);
+    return 0;
+}
+
+        
